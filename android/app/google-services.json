@@ -1,0 +1,30 @@
+{
+  "project_info": {
+    "project_number": "251082910445",
+    "firebase_url": "https://react-http-513bb-default-rtdb.firebaseio.com",
+    "project_id": "react-http-513bb",
+    "storage_bucket": "react-http-513bb.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:251082910445:android:6f291858d67ec54e6b7ae4",
+        "android_client_info": {
+          "package_name": "com.example.test_project"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAtQYxdclV00I4VAVt9HkikA5p1VLRqWw4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
