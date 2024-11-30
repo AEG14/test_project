@@ -1,12 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io' show Platform;
 import 'dart:html' as html;
 import 'package:flutter/material.dart';
 import 'package:csv/csv.dart';
 import 'package:paged_datatable/paged_datatable.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:universal_html/html.dart' as universal_html;
+import 'package:file_picker/file_picker.dart';
 
 import '../const/constant.dart';
 
@@ -25,66 +24,18 @@ class _MaintenanceScreenState extends State<MaintenanceScreen> {
   List<String> _errors = [];
   double _uploadProgress = 0;
   bool _isProcessing = false;
-  bool _isTableLoading = true; // Add loading state for table
+  bool _isTableLoading = true;
 
-  // Add platform detection
-  bool get isMacOS =>
-      html.window.navigator.platform?.toLowerCase().contains('mac') ?? false;
-  final html.FileUploadInputElement uploadInput = html.FileUploadInputElement()
-    ..accept = '.csv'
-    ..style.display = 'none';
   @override
   void initState() {
     super.initState();
-
-    uploadInput.onChange.listen((e) {
-      final files = uploadInput.files;
-      if (files?.isNotEmpty ?? false) {
-        _handleFileUpload(files!.first);
-      }
-    });
-    html.document.body!.children.add(uploadInput);
     _loadDataFromFirestore();
-    _configureForPlatform();
   }
 
   @override
   void dispose() {
-    uploadInput.remove();
-    _tableController.dispose(); // Properly dispose of the controller
+    _tableController.dispose();
     super.dispose();
-  }
-
-  void _configureForPlatform() {
-    // Apply platform-specific configurations
-    if (isMacOS) {
-      // Add MacOS-specific meta tags
-      final head = html.document.head;
-      if (head != null) {
-        // Add MacOS-specific viewport meta tag
-        var meta = html.MetaElement()
-          ..name = 'viewport'
-          ..content =
-              'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no';
-        head.children.add(meta);
-
-        // Add CSS for MacOS font rendering
-        var style = html.StyleElement()
-          ..text = '''
-            body {
-              -webkit-font-smoothing: antialiased;
-              -moz-osx-font-smoothing: grayscale;
-            }
-            
-            /* Fix for MacOS Chrome table rendering */
-            table {
-              -webkit-border-horizontal-spacing: 0;
-              -webkit-border-vertical-spacing: 0;
-            }
-          ''';
-        head.children.add(style);
-      }
-    }
   }
 
   Future<void> _loadDataFromFirestore() async {
@@ -111,150 +62,152 @@ class _MaintenanceScreenState extends State<MaintenanceScreen> {
     }
   }
 
-  Future<void> _handleFileUpload(html.File file) async {
+  Future<void> _handleFileUpload(PlatformFile file) async {
     setState(() {
       _isProcessing = true;
       _uploadProgress = 0;
       _errors.clear();
     });
 
-    final reader = html.FileReader();
-
-    reader.onLoadEnd.listen((e) async {
-      try {
-        if (reader.result == null) throw Exception("Failed to read file");
-
-        String csvString;
-        if (reader.result is String) {
-          csvString = reader.result as String;
-        } else {
-          final bytes = (reader.result as html.Blob).slice(0).toString();
-          csvString = bytes;
-        }
-
-        List<List<dynamic>> csvData =
-            const CsvToListConverter().convert(csvString);
-        if (csvData.isEmpty) throw Exception("CSV file is empty");
-
-        // Validate CSV structure
-        final headers = csvData[0].map((e) => e.toString()).toList();
-        final requiredColumns = {
-          "material_name": "品目名1",
-          "standard_unit": "標準単位",
-          "standard_unit_cost": "標準単価",
-        };
-
-        final indices = requiredColumns.map((key, value) {
-          final index = headers.indexOf(value);
-          return MapEntry(key, index);
-        });
-
-        if (indices.values.any((index) => index == -1)) {
-          throw Exception("Required columns are missing in the CSV file");
-        }
-
-        // Prepare data for validation
-        List<Map<String, dynamic>> newData = [];
-        for (var i = 1; i < csvData.length; i++) {
-          final row = csvData[i];
-          if (row.length < headers.length) continue;
-
-          final dataRow = {
-            "material_name": row[indices["material_name"]!].toString(),
-            "standard_unit": row[indices["standard_unit"]!].toString(),
-            "standard_unit_cost":
-                row[indices["standard_unit_cost"]!].toString(),
-            "created_at": Timestamp.now(),
-            "created_by": "csv",
-            "updated_at": Timestamp.now(),
-            "updated_by": "csv",
-          };
-
-          if (_validateRow(dataRow, i)) {
-            newData.add(dataRow);
-          }
-        }
-
-        // If there are validation errors, show them immediately
-        if (_errors.isNotEmpty) {
-          _showErrorDialog('Validation errors found in CSV file');
-          setState(() {
-            _isProcessing = false;
-          });
-          return;
-        }
-
-        // Proceed with Firestore update
-        await _updateFirestore(newData);
-      } catch (e) {
-        _showErrorDialog('Failed to process CSV file: ${e.toString()}');
-      } finally {
-        setState(() {
-          _isProcessing = false;
-        });
-      }
-    });
-
-    reader.readAsText(file, 'Shift-JIS');
-  }
-
-  Future<void> _processCsvData(String csvString) async {
     try {
+      final reader = html.FileReader();
+      final blob = html.Blob([file.bytes!]);
+      reader.readAsText(blob, 'Shift-JIS');
+      await reader.onLoadEnd.first;
+
+      if (reader.result == null) throw Exception("Failed to read file");
+
+      String csvString;
+      if (reader.result is String) {
+        csvString = reader.result as String;
+      } else {
+        final bytes = (reader.result as html.Blob).slice(0).toString();
+        csvString = bytes;
+      }
+
       List<List<dynamic>> csvData =
           const CsvToListConverter().convert(csvString);
       if (csvData.isEmpty) throw Exception("CSV file is empty");
 
-      // Validate CSV structure
-      final headers = csvData[0].map((e) => e.toString().trim()).toList();
+      final headers = csvData[0].map((e) => e.toString()).toList();
       final requiredColumns = {
         "material_name": "品目名1",
+        "item_name_2": "品目名2",
         "standard_unit": "標準単位",
         "standard_unit_cost": "標準単価",
       };
-
-      // Validate headers
-      for (var entry in requiredColumns.entries) {
-        if (!headers.contains(entry.value)) {
-          throw Exception("Required column '${entry.value}' is missing");
-        }
-      }
 
       final indices = requiredColumns.map((key, value) {
         final index = headers.indexOf(value);
         return MapEntry(key, index);
       });
 
-      // Process data rows with validation
+      if (indices.values.any((index) => index == -1)) {
+        throw Exception("Required columns are missing in the CSV file");
+      }
+
+      Set<String> materialNames = {};
+
       List<Map<String, dynamic>> newData = [];
       for (var i = 1; i < csvData.length; i++) {
         final row = csvData[i];
         if (row.length < headers.length) continue;
 
         final dataRow = {
-          "material_name": row[indices["material_name"]!].toString().trim(),
-          "standard_unit": row[indices["standard_unit"]!].toString().trim(),
-          "standard_unit_cost":
-              row[indices["standard_unit_cost"]!].toString().trim(),
+          "material_name": row[indices["material_name"]!].toString(),
+          "item_name_2": row[indices["item_name_2"]!].toString(),
+          "standard_unit": row[indices["standard_unit"]!].toString(),
+          "standard_unit_cost": row[indices["standard_unit_cost"]!].toString(),
           "created_at": Timestamp.now(),
           "created_by": "csv",
           "updated_at": Timestamp.now(),
           "updated_by": "csv",
         };
 
-        if (_validateRow(dataRow, i)) {
+        if (_validateRow(
+          dataRow,
+          i,
+          indices,
+          materialNames,
+        )) {
           newData.add(dataRow);
+          materialNames.add(
+              "${dataRow["material_name"]?.toString() ?? ''}-${dataRow["item_name_2"]?.toString() ?? ''}");
         }
       }
 
       if (_errors.isNotEmpty) {
         _showErrorDialog('Validation errors found in CSV file');
+        setState(() {
+          _isProcessing = false;
+        });
         return;
       }
 
       await _updateFirestore(newData);
     } catch (e) {
-      _showErrorDialog(e.toString());
+      _showErrorDialog('Failed to process CSV file: ${e.toString()}');
+    } finally {
+      setState(() {
+        _isProcessing = false;
+      });
     }
+  }
+
+  bool _validateRow(
+    Map<String, dynamic> row,
+    int rowIndex,
+    Map<String, int> columnIndices,
+    Set<String> existingMaterialNames,
+  ) {
+    var isValid = true;
+
+    String createErrorMessage(
+        String columnKey, String japaneseColumnName, String error) {
+      final columnIndex = columnIndices[columnKey]! + 1;
+      return "Row ${rowIndex}: Column $columnIndex ($japaneseColumnName/$columnKey) $error";
+    }
+
+    final materialName = row["material_name"].toString().trim();
+    final itemName2 = row["item_name_2"].toString().trim();
+    final combinedName = "$materialName-$itemName2";
+
+    if (materialName.isEmpty) {
+      _errors.add(createErrorMessage(
+        "material_name",
+        "品目名1",
+        "is empty",
+      ));
+      isValid = false;
+    } else if (existingMaterialNames.contains(combinedName)) {
+      _errors.add(createErrorMessage(
+        "material_name",
+        "品目名1",
+        "is duplicate. Material names must be unique",
+      ));
+      isValid = false;
+    }
+
+    if (row["standard_unit"].toString().trim().isEmpty) {
+      _errors.add(createErrorMessage(
+        "standard_unit",
+        "標準単位",
+        "is empty",
+      ));
+      isValid = false;
+    }
+
+    final cost = double.tryParse(row["standard_unit_cost"].toString());
+    if (cost == null) {
+      _errors.add(createErrorMessage(
+        "standard_unit_cost",
+        "標準単価",
+        "is not a valid decimal",
+      ));
+      isValid = false;
+    }
+
+    return isValid;
   }
 
   Future<void> _updateFirestore(List<Map<String, dynamic>> newData) async {
@@ -263,12 +216,10 @@ class _MaintenanceScreenState extends State<MaintenanceScreen> {
         _uploadProgress = 0;
       });
 
-      // Calculate total operations (deletions + additions)
       final existingDocs = await _firestore.collection('materials').get();
       final totalOperations = existingDocs.docs.length + newData.length;
       int completedOperations = 0;
 
-      // Delete existing documents in batches
       for (var i = 0; i < existingDocs.docs.length; i += 500) {
         final batch = _firestore.batch();
         final end = (i + 500 < existingDocs.docs.length)
@@ -290,7 +241,6 @@ class _MaintenanceScreenState extends State<MaintenanceScreen> {
         }
       }
 
-      // Add new documents in batches
       for (var i = 0; i < newData.length; i += 500) {
         final batch = _firestore.batch();
         final end = (i + 500 < newData.length) ? i + 500 : newData.length;
@@ -311,7 +261,6 @@ class _MaintenanceScreenState extends State<MaintenanceScreen> {
         }
       }
 
-      // Ensure progress shows 100% when complete
       if (mounted) {
         setState(() {
           _uploadProgress = 100;
@@ -326,7 +275,6 @@ class _MaintenanceScreenState extends State<MaintenanceScreen> {
               content: Text('CSV data successfully uploaded to Firestore')),
         );
 
-        // Reset processing state after small delay to show 100%
         Future.delayed(const Duration(milliseconds: 500), () {
           if (mounted) {
             setState(() {
@@ -345,29 +293,6 @@ class _MaintenanceScreenState extends State<MaintenanceScreen> {
         _showErrorDialog('Failed to update Firestore: ${e.toString()}');
       }
     }
-  }
-
-  bool _validateRow(Map<String, dynamic> row, int rowIndex) {
-    var isValid = true;
-
-    if (row["material_name"].toString().trim().isEmpty) {
-      _errors.add("Row $rowIndex: 品目名1 (material_name) is empty.");
-      isValid = false;
-    }
-
-    if (row["standard_unit"].toString().trim().isEmpty) {
-      _errors.add("Row $rowIndex: 標準単位 (standard_unit) is empty.");
-      isValid = false;
-    }
-
-    final cost = double.tryParse(row["standard_unit_cost"].toString());
-    if (cost == null) {
-      _errors.add(
-          "Row $rowIndex: 標準単価 (standard_unit_cost) is not a valid decimal.");
-      isValid = false;
-    }
-
-    return isValid;
   }
 
   void _showErrorDialog(String message) {
@@ -442,14 +367,13 @@ class _MaintenanceScreenState extends State<MaintenanceScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text("Master Maintenance Screen"),
+        title: const Text("Test 3 Master Maintenance Screen"),
         backgroundColor: tBlue2,
         foregroundColor: tWhite,
       ),
       body: ScrollConfiguration(
         behavior: ScrollConfiguration.of(context).copyWith(
           physics: const BouncingScrollPhysics(),
-          platform: isMacOS ? TargetPlatform.macOS : Theme.of(context).platform,
         ),
         child: Padding(
           padding: const EdgeInsets.all(16.0),
@@ -465,7 +389,7 @@ class _MaintenanceScreenState extends State<MaintenanceScreen> {
                   foregroundColor: tWhite,
                   backgroundColor: tBlue2,
                 ),
-                onPressed: _isProcessing ? null : () => uploadInput.click(),
+                onPressed: _isProcessing ? null : _pickFile,
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
@@ -490,6 +414,18 @@ class _MaintenanceScreenState extends State<MaintenanceScreen> {
         ),
       ),
     );
+  }
+
+  Future<void> _pickFile() async {
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['csv'],
+    );
+
+    if (result != null && result.files.isNotEmpty) {
+      final file = result.files.first;
+      await _handleFileUpload(file);
+    }
   }
 
   Widget _buildProgressIndicator() {
@@ -540,6 +476,12 @@ class _MaintenanceScreenState extends State<MaintenanceScreen> {
           title: const Text("品目名1"),
           cellBuilder: (context, item, index) =>
               Text(item["material_name"] ?? ''),
+          size: const RemainingColumnSize(),
+        ),
+        TableColumn(
+          title: const Text("品目名2"),
+          cellBuilder: (context, item, index) =>
+              Text(item["item_name_2"] ?? ''),
           size: const RemainingColumnSize(),
         ),
         TableColumn(
